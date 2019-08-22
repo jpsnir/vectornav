@@ -8,7 +8,7 @@ serial_baud: 115200
 # Acceptable data rates in Hz: 1, 2, 4, 5, 10, 20, 25, 40, 50, 100, 200
 # Baud rate must be able to handle the data rate
 async_output_rate: 40
-
+sync_out_count_rate: 20
 # Frame id to publish data in
 frame_id: imu_link
 

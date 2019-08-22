@@ -28,6 +28,7 @@
 #define PI 3.14159265358979323846  /* pi */
 
 // ROS Libraries
+#include <unistd.h>
 #include "ros/ros.h"
 #include "sensor_msgs/Imu.h"
 #include "sensor_msgs/MagneticField.h"
@@ -50,7 +51,7 @@ XmlRpc::XmlRpcValue rpc_temp;
 #include "vn/sensors.h"
 #include "vn/compositedata.h"
 #include "vn/util.h"
-
+#include <ros/console.h>
 using namespace std;
 using namespace vn::math;
 using namespace vn::sensors;
@@ -110,6 +111,7 @@ int main(int argc, char *argv[])
     string SensorPort;
     int SensorBaudrate;
     int async_output_rate;
+    int syncoutcount_rate;
 
     // Load all params
     pn.param<std::string>("frame_id", frame_id, "vectornav");
@@ -117,6 +119,7 @@ int main(int argc, char *argv[])
     pn.param<int>("async_output_rate", async_output_rate, 40);
     pn.param<std::string>("serial_port", SensorPort, "/dev/ttyUSB0");
     pn.param<int>("serial_baud", SensorBaudrate, 115200);
+    pn.param<int>("sync_out_count_rate",syncoutcount_rate,2);
 
     //Call to set covariances
     if(pn.getParam("linear_accel_covariance",rpc_temp))
@@ -199,7 +202,26 @@ int main(int argc, char *argv[])
     ROS_INFO("Model Number: %s", mn.c_str());
 
     // Set Data output Freq [Hz]
-    vs.writeAsyncDataOutputFrequency(async_output_rate);
+    vs.writeAsyncDataOutputFrequency(40);
+    
+    // Set synchronisation control register
+    SynchronizationControlRegister scr(
+	SYNCINMODE_COUNT, ///< The syncInMode field.
+	SYNCINEDGE_RISING, ///< The syncInEdge field.
+	0, ///< The syncInSkipFactor field.
+	SYNCOUTMODE_IMUREADY, ///< The syncOutMode field.
+	SYNCOUTPOLARITY_POSITIVE, ///< The syncOutPolarity field.
+	799, ///< The syncOutSkipFactor field.
+	1000000);
+	ROS_INFO("worked till here");
+	ros::Duration(1).sleep();
+	
+	vs.writeAsyncDataOutputType(VNOFF,true);
+	vs.writeSynchronizationControl(scr, true);
+	ROS_INFO("after setting sync control reg");
+	SynchronizationControlRegister r = vs.readSynchronizationControl();
+	ROS_INFO("sync control register %d %d %d %d",r.syncOutMode,r.syncOutPolarity,r.syncOutSkipFactor,r.syncOutPulseWidth);
+	ros::Duration(1).sleep();
 
     // Configure binary output message
     BinaryOutputRegister bor(
@@ -207,21 +229,23 @@ int main(int argc, char *argv[])
             1000 / async_output_rate,  // update rate [ms]
             COMMONGROUP_QUATERNION
             | COMMONGROUP_ANGULARRATE
-            | COMMONGROUP_POSITION
             | COMMONGROUP_ACCEL
             | COMMONGROUP_MAGPRES,
-            TIMEGROUP_NONE,
+            TIMEGROUP_SYNCOUTCNT,
             IMUGROUP_NONE,
             GPSGROUP_NONE,
-            ATTITUDEGROUP_YPRU, //<-- returning yaw pitch roll uncertainties
-            INSGROUP_INSSTATUS
-            | INSGROUP_POSLLA
-            | INSGROUP_POSECEF
-            | INSGROUP_VELBODY
-            | INSGROUP_ACCELECEF);
+            ATTITUDEGROUP_NONE, //<-- returning yaw pitch roll uncertainties
+            INSGROUP_NONE);
 
     vs.writeBinaryOutput1(bor);
-
+    
+    for(int i = 0; i < 10; i++)
+	{	
+		SynchronizationStatusRegister sync_status_reg = vs.readSynchronizationStatus();
+		ROS_INFO(" The sync out count from polling: %d %d %d",sync_status_reg.syncInCount,sync_status_reg.syncInTime,sync_status_reg.syncOutCount);
+		//usleep(100000);
+		ros::Duration(0.5).sleep();
+	}
     // Set Data output Freq [Hz]
     vs.writeAsyncDataOutputFrequency(async_output_rate);
     vs.registerAsyncPacketReceivedHandler(NULL, BinaryAsyncMessageReceived);
@@ -247,13 +271,38 @@ int main(int argc, char *argv[])
 //
 void BinaryAsyncMessageReceived(void* userData, Packet& p, size_t index)
 {
-    vn::sensors::CompositeData cd = vn::sensors::CompositeData::parse(p);
-
+	/*SynchronizationStatusRegister sync_status_reg;
+	sync_status_reg = p.genReadSynchronizationStatus();
+	ROS_INFO(" The sync out count from polling: %d %d",sync_status_reg.syncInCount,
+	sync_status_reg.syncInTime,sync_status_reg.syncOutCount);
+	ROS_INFO(" The sync out count from polling: %d %d %d",sync_status_reg.syncInCount,sync_status_reg.syncInTime,sync_status_reg.syncOutCount);
+	* */
+	
+	ROS_INFO("Is packet valid: %d",p.isValid());
+	bool compatible = p.isCompatible(COMMONGROUP_QUATERNION
+											| COMMONGROUP_ANGULARRATE
+											| COMMONGROUP_ACCEL
+											| COMMONGROUP_MAGPRES,
+											TIMEGROUP_SYNCOUTCNT,
+											IMUGROUP_NONE,
+											GPSGROUP_NONE,
+											ATTITUDEGROUP_NONE, //<-- returning yaw pitch roll uncertainties
+											INSGROUP_NONE);
+											
+	ROS_INFO("Is compatible: %d",compatible);
+											
+	ros::Duration(1).sleep();
     // IMU
     sensor_msgs::Imu msgIMU;
     msgIMU.header.stamp = ros::Time::now();
     msgIMU.header.frame_id = frame_id;
-
+    
+    vn::sensors::CompositeData cd;	
+	if(compatible)
+	{
+		cd = vn::sensors::CompositeData::parse(p);
+		ROS_INFO("sync out count %d",cd.timeStartup());
+	}
     if (cd.hasQuaternion() && cd.hasAngularRate() && cd.hasAcceleration())
     {
 
