@@ -38,10 +38,11 @@
 #include "sensor_msgs/FluidPressure.h"
 #include "std_srvs/Empty.h"
 #include "std_msgs/UInt32.h"
+#include "std_msgs/Time.h"
 
-ros::Publisher pubIMU, pubMag, pubGPS, pubOdom, pubTemp, pubPres,pubSyncOut;
+ros::Publisher pubIMU, pubMag, pubGPS, pubOdom, pubTemp, pubPres,pubSyncOut,pubSyncOutTime;
 ros::ServiceServer resetOdomSrv;
-
+int syncOutCnt_old,syncOutCnt;
 //Unused covariances initilized to zero's
 boost::array<double, 9ul> linear_accel_covariance = { };
 boost::array<double, 9ul> angular_vel_covariance = { };
@@ -53,6 +54,7 @@ XmlRpc::XmlRpcValue rpc_temp;
 #include "vn/compositedata.h"
 #include "vn/util.h"
 #include <ros/console.h>
+
 using namespace std;
 using namespace vn::math;
 using namespace vn::sensors;
@@ -106,6 +108,7 @@ int main(int argc, char *argv[])
     pubTemp = n.advertise<sensor_msgs::Temperature>("vectornav/Temp", 1000);
     pubPres = n.advertise<sensor_msgs::FluidPressure>("vectornav/Pres", 1000);
     pubSyncOut = n.advertise<std_msgs::UInt32>("vectornav/SyncOutCount",100);
+    pubSyncOutTime = n.advertise<std_msgs::Time>("vectornav/SyncOutTime",100);
     resetOdomSrv = n.advertiseService("reset_odom", resetOdom);
 
     // Serial Port Settings
@@ -212,7 +215,7 @@ int main(int argc, char *argv[])
 	0, ///< The syncInSkipFactor field.
 	SYNCOUTMODE_IMUREADY, ///< The syncOutMode field.
 	SYNCOUTPOLARITY_POSITIVE, ///< The syncOutPolarity field.
-	9, ///< The syncOutSkipFactor field.
+	39, ///< The syncOutSkipFactor field.
 	1000000);
 	ROS_INFO("worked till here");
 	ros::Duration(1).sleep();
@@ -225,7 +228,7 @@ int main(int argc, char *argv[])
 	ros::Duration(1).sleep();
 
     // Configure binary output message
-    BinaryOutputRegister bor(
+    BinaryOutputRegister bor1(
             ASYNCMODE_PORT1,
             4,  // update rate [ms]
             COMMONGROUP_QUATERNION
@@ -238,15 +241,8 @@ int main(int argc, char *argv[])
             ATTITUDEGROUP_NONE, //<-- returning yaw pitch roll uncertainties
             INSGROUP_NONE);
 
-    vs.writeBinaryOutput1(bor);
+    vs.writeBinaryOutput1(bor1);
     
-    for(int i = 0; i < 10; i++)
-	{	
-		SynchronizationStatusRegister sync_status_reg = vs.readSynchronizationStatus();
-		ROS_INFO(" The sync out count from polling: %d %d %d",sync_status_reg.syncInCount,sync_status_reg.syncInTime,sync_status_reg.syncOutCount);
-		//usleep(100000);
-		ros::Duration(0.5).sleep();
-	}
     // Set Data output Freq [Hz]
     vs.writeAsyncDataOutputFrequency(async_output_rate);
     vs.registerAsyncPacketReceivedHandler(NULL, BinaryAsyncMessageReceived);
@@ -290,12 +286,13 @@ void BinaryAsyncMessageReceived(void* userData, Packet& p, size_t index)
 											ATTITUDEGROUP_NONE, //<-- returning yaw pitch roll uncertainties
 											INSGROUP_NONE);
 											
-	ROS_INFO("Is compatible: %d",compatible);
+	ROS_INFO("Is compatible : %d",compatible);
 											
 	//ros::Duration(1).sleep();
     // IMU
     sensor_msgs::Imu msgIMU;
     std_msgs::UInt32 msgSyncOut;
+    std_msgs::Time syncOutTime;
     msgIMU.header.stamp = ros::Time::now();
     msgIMU.header.frame_id = frame_id;
     vn::sensors::CompositeData cd;	
@@ -304,8 +301,15 @@ void BinaryAsyncMessageReceived(void* userData, Packet& p, size_t index)
 		cd = vn::sensors::CompositeData::parse(p);
 		//ROS_INFO("sync out count %d",cd.timeStartup());
         ROS_INFO(" sync out count is: %d",cd.syncOutCnt());
-        msgSyncOut.data = cd.syncOutCnt();
-        pubSyncOut.publish(msgSyncOut);
+        syncOutCnt = cd.syncOutCnt();
+        if (syncOutCnt != syncOutCnt_old)
+        {
+            msgSyncOut.data = syncOutCnt;
+            pubSyncOut.publish(msgSyncOut);
+            syncOutTime.data = ros::Time::now();
+            pubSyncOutTime.publish(syncOutTime);
+        }
+        syncOutCnt_old = syncOutCnt;
 	}
     if (cd.hasQuaternion() && cd.hasAngularRate() && cd.hasAcceleration())
     {
