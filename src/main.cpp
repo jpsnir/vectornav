@@ -37,8 +37,9 @@
 #include "sensor_msgs/Temperature.h"
 #include "sensor_msgs/FluidPressure.h"
 #include "std_srvs/Empty.h"
+#include "std_msgs/UInt32.h"
 
-ros::Publisher pubIMU, pubMag, pubGPS, pubOdom, pubTemp, pubPres;
+ros::Publisher pubIMU, pubMag, pubGPS, pubOdom, pubTemp, pubPres,pubSyncOut;
 ros::ServiceServer resetOdomSrv;
 
 //Unused covariances initilized to zero's
@@ -104,7 +105,7 @@ int main(int argc, char *argv[])
     pubOdom = n.advertise<nav_msgs::Odometry>("vectornav/Odom", 1000);
     pubTemp = n.advertise<sensor_msgs::Temperature>("vectornav/Temp", 1000);
     pubPres = n.advertise<sensor_msgs::FluidPressure>("vectornav/Pres", 1000);
-
+    pubSyncOut = n.advertise<std_msgs::UInt32>("vectornav/SyncOutCount",100);
     resetOdomSrv = n.advertiseService("reset_odom", resetOdom);
 
     // Serial Port Settings
@@ -211,7 +212,7 @@ int main(int argc, char *argv[])
 	0, ///< The syncInSkipFactor field.
 	SYNCOUTMODE_IMUREADY, ///< The syncOutMode field.
 	SYNCOUTPOLARITY_POSITIVE, ///< The syncOutPolarity field.
-	799, ///< The syncOutSkipFactor field.
+	9, ///< The syncOutSkipFactor field.
 	1000000);
 	ROS_INFO("worked till here");
 	ros::Duration(1).sleep();
@@ -226,7 +227,7 @@ int main(int argc, char *argv[])
     // Configure binary output message
     BinaryOutputRegister bor(
             ASYNCMODE_PORT1,
-            1000 / async_output_rate,  // update rate [ms]
+            4,  // update rate [ms]
             COMMONGROUP_QUATERNION
             | COMMONGROUP_ANGULARRATE
             | COMMONGROUP_ACCEL
@@ -291,17 +292,20 @@ void BinaryAsyncMessageReceived(void* userData, Packet& p, size_t index)
 											
 	ROS_INFO("Is compatible: %d",compatible);
 											
-	ros::Duration(1).sleep();
+	//ros::Duration(1).sleep();
     // IMU
     sensor_msgs::Imu msgIMU;
+    std_msgs::UInt32 msgSyncOut;
     msgIMU.header.stamp = ros::Time::now();
     msgIMU.header.frame_id = frame_id;
-    
     vn::sensors::CompositeData cd;	
 	if(compatible)
 	{
 		cd = vn::sensors::CompositeData::parse(p);
-		ROS_INFO("sync out count %d",cd.timeStartup());
+		//ROS_INFO("sync out count %d",cd.timeStartup());
+        ROS_INFO(" sync out count is: %d",cd.syncOutCnt());
+        msgSyncOut.data = cd.syncOutCnt();
+        pubSyncOut.publish(msgSyncOut);
 	}
     if (cd.hasQuaternion() && cd.hasAngularRate() && cd.hasAcceleration())
     {
