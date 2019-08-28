@@ -35,6 +35,7 @@ set(SOURCE
         src/util.cpp
         src/utilities.cpp
         src/vntime.cpp
+        src/jetsonGPIO.c
         include/vn/exceptions.h
         include/vn/matrix.h
         include/vn/attitude.h
@@ -67,7 +68,8 @@ set(SOURCE
         include/vn/port.h
         include/vn/util.h
         include/vn/consts.h
-        include/vn/packet.h)
+        include/vn/packet.h
+        include/vn/jetsonGPIO.h)
 
 include_directories(
     include)

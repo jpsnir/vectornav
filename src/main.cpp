@@ -54,6 +54,9 @@ XmlRpc::XmlRpcValue rpc_temp;
 #include "vn/compositedata.h"
 #include "vn/util.h"
 #include <ros/console.h>
+extern "C" {
+#include "vn/jetsonGPIO.h"
+}
 
 using namespace std;
 using namespace vn::math;
@@ -310,6 +313,11 @@ void BinaryAsyncMessageReceived(void* userData, Packet& p, size_t index)
             pubSyncOutTime.publish(syncOutTime);
         }
         syncOutCnt_old = syncOutCnt;
+        
+        jetsonTX1GPIONumber syncOutCnt = gpio36;        
+        gpioExport(syncOutCnt);
+        gpioSetDirection(syncOutCnt, outputPin);
+        
 	}
     if (cd.hasQuaternion() && cd.hasAngularRate() && cd.hasAcceleration())
     {
